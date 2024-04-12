@@ -1,0 +1,126 @@
+# GitHub Actionsのワークフローの名前
+name: Cfn Deploy
+
+# Workflow Icon
+branding:
+  icon: "cloud"
+  color: "red"
+
+# GitHub Actions の起動条件
+# - 記載のブランチとファイル名がpushされた場合にGitHub Actionsを実行する。
+#   ※マージ後にマージ先のpushイベントが動くためpushを指定
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - release
+    paths:
+      - .github/workflows/*.yaml
+      - "cloudformation/*.yaml"
+      - "cloudformation/*.json"
+
+# デプロイ先のCFn情報
+env:
+  STACK_NAME: Stack-Name #CFnスタック名
+  YAML_NAME: test.yaml #CFnテンプレート
+  JSON_FILE: test-parameter.json #CFnの入力パラメータ
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    # ブランチによって実行先の各環境のSelf-hosted Runnerを指定。
+    # 実行環境はセルフホストランナーにラベルを付けて判断させている。
+    #  - 本番環境：mainブランチ　prdラベル
+    #  - ステージング環境：releaseブランチ stgラベル
+    #  - 開発環境:developブランチ　devラベル
+    #  - その他：featureブランチなど devラベル
+    runs-on: >-
+      ${{ 
+        github.ref == 'refs/heads/main'         && fromJSON('[ "self-hosted", "prd" ]') ||
+        github.ref == 'refs/heads/release'      && fromJSON('[ "self-hosted", "stg" ]') ||
+        fromJSON('[ "self-hosted", "dev" ]')
+      }}
+    # GitHub Actionsのタイムアウト(分)
+    timeout-minutes: 40
+    # 各環境固有の情報をGitHubのEnvironmentに格納している。
+    #  例：AWSアカウントID、S3情報、IAMロール、環境名(dev,prd,stg)など
+    #     本コードでは以下のように定義しています。
+    #      - production(本番)、staging(ステージング）、development（開発）の3つのEnvironmentsを作成
+    #      - secrets.AWS_ROLEARN・・・IAMロールを指定
+    #      - secrets.AWS_CFN_BUCKETNAME・・・CFnテンプレートを配置するバケット名
+    #      - secrets.AWS_ENV・・・環境名(dev,prd,stg)
+    environment:
+      name: >-
+        ${{
+          github.ref == 'refs/heads/main'         && 'production' ||
+          github.ref == 'refs/heads/release'      && 'staging'    ||
+          'development'
+        }}
+    steps:
+      - name: GitHub Event Context Info
+        run: |
+          echo "github.event_name=${{github.event_name}}"
+          echo "BRACHE : github.ref=${{github.ref}}"
+      # Self-hosted RunnerにGitHubリポジトリのファイルをコピー
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Self-hosted Runnerに環境変数を定義
+      - name: Destination settings
+        env:
+          TZ: "Asia/Tokyo" # 時刻タイムゾーン変更
+        run: |
+          # GitHub Actionsの実行回数
+          echo "RUN_NO=${{github.run_attempt}}"             >> $GITHUB_ENV
+          # 現在時刻の取得
+          echo "CURRENT_DATETIME=$(date +'%Y%m%d-%H%M%S')"  >> $GITHUB_ENV
+          echo "Github Actions Run Count : ${{github.run_attempt}}"
+      # AWSのIAMロール認証
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{secrets.AWS_ROLEARN}}
+          aws-region: ap-northeast-1
+
+      # S3にCFnテンプレートなどをコピー
+      - name: S3 Bucket File Upload
+        run: |
+          aws s3 cp ./${{env.YAML_NAME}} s3://${{secrets.AWS_CFN_BUCKETNAME}}/
+
+      # CFnの変更セットを実行
+      - name: Create Change Set ${{env.YAML_NAME}}
+        run: >
+          aws cloudformation create-change-set --stack-name ${{env.STACK_NAME}} 
+          --change-set-name "GitHubActions-${{env.CURRENT_DATETIME}}" 
+          --template-url  https://${{secrets.AWS_CFN_BUCKETNAME}}.s3.ap-northeast-1.amazonaws.com/${{env.YAML_NAME}}
+          --parameters file://${{secrets.AWS_ENV}}-${{env.JSON_FILE}} --capabilities CAPABILITY_NAMED_IAM
+
+      # CFnの変更セットIDを取得
+      - name: Change Set ID Get ${{env.YAML_NAME}}
+        run: >
+          echo "CHANGESETID=$(aws cloudformation list-change-sets --stack-name ${{env.STACK_NAME}} --output yaml | 
+          grep changeSet/GitHubActions-${{env.CURRENT_DATETIME}} | 
+          awk '{print $3}')"  >> ${GITHUB_ENV}
+
+      # CFnの変更セット実行結果を取得
+      # - CFn変更セットの作成に成功すれば正常終了
+      # - CFnに変更が何もなければ正常終了
+      # - CFn変更セットの作成に失敗すれば異常終了で後続のデプロイは実行しない
+      - name: Change Set Check ${{env.YAML_NAME}}
+        run: |
+          while true Hub Actionsを再実行した場合にはデプロイを実行
+      - name: Cfn Deploy ${{env.YAML_NAME}}
+        if: env.RUN_NO != '1'  && env.STATUS == 'CREATE_COMPLETE'
+        run: aws cloudformation execute-change-set --change-set-name ${{env.CHANGESETID}}
+
+      # CFnのデプロイ結果確認
+      #  - UPDATE-COMPLATEの時だけ正常終了
+      #  - 上記以外のステータスの場合は異常終了
+      - name: Cfn Deploy Check ${{env.YAML_NAME}}
+        if: env.RUN_NO != '1'  && env.STATUS == 'CREATE_COMPLETE'
+        run: aws cloudformation wait stack-update-complete --stack-name ${{env.STACK_NAME}}

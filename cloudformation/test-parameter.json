@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "env",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "retentionindays",
+    "ParameterValue": "90"
+  }
+]

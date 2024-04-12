@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudWatchLogs
+Parameters:
+  env:
+    Description: |
+      (Require) Select Environment.
+    Type: String
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+    Default: dev
+  retentionindays:
+    Description: |
+      (Require) CloudWatchLogs Retention in Dayw.
+    Type: String
+    Default: "90"
+Resources:
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${env}-testlog
+      RetentionInDays: !Ref "retentionindays"
