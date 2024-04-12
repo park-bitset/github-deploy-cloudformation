@@ -2,9 +2,9 @@
 name: Cfn Deploy
 
 # Workflow Icon
-branding:
-  icon: "cloud"
-  color: "red"
+# branding:
+#   icon: "cloud"
+#   color: "red"
 
 # GitHub Actions の起動条件
 # - 記載のブランチとファイル名がpushされた場合にGitHub Actionsを実行する。
